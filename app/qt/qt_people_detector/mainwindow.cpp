@@ -8,6 +8,12 @@
 #include <QDebug>
 #include <QCloseEvent>
 
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QHttpMultiPart>
+#include <QBuffer>
+
 #ifdef __APPLE__
 #include <mach/mach.h>
 #elif defined(_WIN32)
@@ -18,7 +24,8 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
-    cameraTimer(new QTimer(this))
+    cameraTimer(new QTimer(this)),
+    networkManager(new QNetworkAccessManager(this))
 {
     setupUI();
 
@@ -38,12 +45,33 @@ void MainWindow::processFrame()
 
     // ---------- HOG Detection ----------
     if (detectionEnabled && humanDetector.isLoaded()) {
-
+        // Reducimos el frame ya que HOG es carisimo
         cv::Mat resized;
         cv::resize(frame, resized, cv::Size(), 0.5, 0.5);
 
+        // Deteccion sobre el frame pequeño
         auto boxes = humanDetector.detect(resized);
 
+        bool detectedNow = !boxes.empty();
+        if (detectedNow) {
+            humanPresent = true;
+            humanLostTimer.restart();
+        } else {
+            if (humanPresent && humanLostTimer.elapsed() > HUMAN_LOST_MS) {
+                humanPresent = false;
+                eventTriggered = false;
+            }
+        }
+
+        if (humanPresent && !eventTriggered) {
+            eventTriggered = true;
+
+            cv::Mat frameBGR = frame.clone();
+            sendImageToAPI(frameBGR);
+        }
+
+
+        // Escalado de las cajas
         for (const auto& box : boxes) {
             cv::Rect scaledBox(
                 box.x * 2,
@@ -51,12 +79,14 @@ void MainWindow::processFrame()
                 box.width * 2,
                 box.height * 2
                 );
+            // Dibujo Final
             cv::rectangle(frame, scaledBox, cv::Scalar(0, 255, 0), 2);
         }
     }
 
     // ---------- Convert for Qt ----------
     cv::Mat rgbFrame;
+    cv::Mat frameBGR = frame.clone();
     cv::cvtColor(frame, rgbFrame, cv::COLOR_BGR2RGB);
 
     QImage image(
@@ -67,12 +97,15 @@ void MainWindow::processFrame()
         QImage::Format_RGB888
         );
 
+    // Renderizado en la UI
     videoLabel->setPixmap(
         QPixmap::fromImage(image)
             .scaled(videoLabel->size(),
                     Qt::KeepAspectRatio,
                     Qt::SmoothTransformation)
         );
+
+
 
     // ---------- FPS & RAM ----------
     frameCount++;
@@ -90,9 +123,43 @@ void MainWindow::processFrame()
     }
 }
 
+
+void MainWindow::sendImageToAPI(const cv::Mat& frame){
+    static bool sending = false;
+    if (sending) return;   // protección extra
+    sending = true;
+
+    // Codificar imagen a JPG
+    std::vector<uchar> buffer;
+    cv::imencode(".jpg", frame, buffer);
+
+    QByteArray imageData(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+
+    // Multipart
+    QHttpMultiPart* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart imagePart;
+    imagePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                        QVariant("form-data; name=\"file\"; filename=\"frame.jpg\""));
+    imagePart.setBody(imageData);
+
+    multiPart->append(imagePart);
+
+    // Request
+    QNetworkRequest request(QUrl("http://127.0.0.1:8000/send/image"));
+
+    QNetworkReply* reply = networkManager->post(request, multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished, this, [reply]() {
+        reply->deleteLater();
+        qDebug() << "[API] Image sent";
+        sending = false;
+    });
+}
+
 void MainWindow::setupUI()
 {
-
     // ---------- Central Widget ----------
     QWidget* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
@@ -102,35 +169,30 @@ void MainWindow::setupUI()
     videoLabel->setAlignment(Qt::AlignCenter);
     videoLabel->setStyleSheet(
         "QLabel { background-color: black; color: white; font-size: 16px; }"
-        );
+    );
     videoLabel->setMinimumSize(640, 480);
 
     // ---------- Buttons ----------
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
     startButton = new QPushButton("Start Camera");
     stopButton  = new QPushButton("Stop Camera");
-
-    connect(startButton, &QPushButton::clicked,
-            this, &MainWindow::onStartCamera);
-    connect(stopButton, &QPushButton::clicked,
-            this, &MainWindow::onStopCamera);
-
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    connect(startButton, &QPushButton::clicked, this, &MainWindow::onStartCamera);
+    connect(stopButton, &QPushButton::clicked, this, &MainWindow::onStopCamera);
     buttonLayout->addStretch();
     buttonLayout->addWidget(startButton);
     buttonLayout->addWidget(stopButton);
     buttonLayout->addStretch();
 
+
     // ---------- Main Layout ----------
     QVBoxLayout* mainLayout = new QVBoxLayout();
     mainLayout->addWidget(videoLabel);
     mainLayout->addLayout(buttonLayout);
-
     centralWidget->setLayout(mainLayout);
 
     // ---------- Status Bar ----------
     fpsLabel = new QLabel("FPS: --");
     ramLabel = new QLabel("RAM: --");
-
     statusBar()->addPermanentWidget(fpsLabel);
     statusBar()->addPermanentWidget(ramLabel);
 
@@ -178,7 +240,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     event->accept();
 }
-
 
 
 void MainWindow::onStartCamera()
