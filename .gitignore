@@ -1,0 +1,30 @@
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Python cachés
+__pycache__/
+*.py[cod]
+
+# C++ / Compilación
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+
+# Datos y Multimedia (Lo que más pesa)
+dataset/
+data/
+*.mp4
+*.jpg
+*.png
+*.jpeg
+*.zip
+*.tar.gz
+
+# IDEs
+.vscode/
+.idea/

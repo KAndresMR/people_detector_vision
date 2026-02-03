@@ -1,0 +1,15 @@
+opencv-python
+opencv-contrib-python
+numpy
+scikit-image
+scikit-learn
+albumentations
+matplotlib
+joblib
+psutil
+torch
+torchvision
+fastapi
+uvicorn
+python-telegram-bot
+mediapipe
