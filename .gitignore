@@ -16,7 +16,10 @@ obj/
 *.so
 
 # Datos y Multimedia (Lo que más pesa)
-dataset/
+datasets/
+scripts/img_negatives
+scripts/img_positives
+desktop_app/build
 data/
 *.mp4
 *.jpg

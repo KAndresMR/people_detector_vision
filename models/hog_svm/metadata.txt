@@ -1,7 +1,0 @@
-# Ese metadata.txt luego puede tener:
-	•	dataset usado
-	•	fecha
-	•	precisión
-	•	quién lo entrenó
-
-Eso te cubre éticamente y académicamente (la guía lo exige).
